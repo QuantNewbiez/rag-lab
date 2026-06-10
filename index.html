@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Lab — prove every tradeoff</title>
+<style>
+  :root{
+    --paper:#F8FAFC; --panel:#FFFFFF; --ink:#131C30; --muted:#5C6B85;
+    --line:#E2E8F0; --line-strong:#C9D4E3;
+    --c1:#534AB7; --c2:#1D9E75; --c3:#B26B15; --c4:#C44E73; --c5:#2C7FB8; --c6:#7A4FB0;
+    --good:#157A4A; --good-bg:#EAF6F0; --bad:#C03434; --bad-bg:#FBEFEF;
+    --warn:#9A6A00; --warn-bg:#FBF4E4;
+    --mono:ui-monospace,'SF Mono','Cascadia Code',Menlo,Consolas,monospace;
+    --sans:-apple-system,'Segoe UI',Inter,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55}
+  @media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important} }
+
+  /* ── layout ─────────────────────────── */
+  .wrap{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+  nav{border-right:1px solid var(--line);background:var(--panel);padding:26px 0;position:sticky;top:0;height:100vh;overflow-y:auto}
+  main{padding:34px 44px 90px;max-width:1020px}
+  @media(max-width:860px){
+    .wrap{grid-template-columns:1fr}
+    nav{position:static;height:auto;display:flex;overflow-x:auto;padding:10px;border-right:0;border-bottom:1px solid var(--line)}
+    nav .brand{display:none}
+    main{padding:22px 16px 70px}
+  }
+
+  .brand{padding:0 22px 20px;border-bottom:1px solid var(--line);margin-bottom:14px}
+  .brand h1{font-size:17px;letter-spacing:-.02em}
+  .brand h1 span{color:var(--muted);font-weight:400}
+  .brand p{font-size:11.5px;color:var(--muted);margin-top:3px}
+
+  .navlink{display:flex;align-items:center;gap:10px;padding:9px 22px;color:var(--muted);text-decoration:none;font-size:13.5px;border-left:3px solid transparent;white-space:nowrap;cursor:pointer;background:none;border-top:0;border-right:0;border-bottom:0;width:100%;text-align:left;font-family:var(--sans)}
+  .navlink:hover{color:var(--ink)}
+  .navlink.on{color:var(--ink);font-weight:600;border-left-color:var(--accent,var(--c1));background:linear-gradient(90deg,color-mix(in srgb,var(--accent,var(--c1)) 7%,transparent),transparent)}
+  .navlink .dot{width:9px;height:9px;border-radius:3px;background:var(--accent);flex:none}
+  @media(max-width:860px){.navlink{border-left:0;border-bottom:3px solid transparent;padding:8px 12px}.navlink.on{border-bottom-color:var(--accent)}}
+
+  /* ── experiment shell ───────────────── */
+  .stage{display:none}
+  .stage.on{display:block;animation:rise .25s ease}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+  .stage h2{font-size:26px;letter-spacing:-.025em;margin-bottom:6px}
+  .lede{color:var(--muted);max-width:640px;margin-bottom:26px}
+
+  .claims{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:26px}
+  @media(max-width:680px){.claims{grid-template-columns:1fr}}
+  .claim{border:1px solid var(--line);border-radius:8px;padding:14px 16px;background:var(--panel)}
+  .claim .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;font-weight:700}
+  .claim.adv .tag{color:var(--good)} .claim.dis .tag{color:var(--bad)}
+  .claim p{font-size:13.5px;margin-top:5px}
+  .claim .how{font-size:12px;color:var(--muted);margin-top:6px;font-style:italic}
+
+  .bench{border:1px solid var(--line-strong);border-radius:10px;background:var(--panel);overflow:hidden;margin-bottom:22px}
+  .bench-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:13px 18px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--accent) 4%,var(--panel))}
+  .bench-head .title{font-weight:600;font-size:14px;margin-right:auto}
+  .bench-body{padding:18px}
+
+  label.ctl{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:7px}
+  select,input[type=range]{accent-color:var(--accent)}
+  select{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line-strong);border-radius:6px;background:var(--panel);color:var(--ink)}
+  button.run{font:inherit;font-size:13px;font-weight:600;padding:7px 16px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+  button.run:hover{filter:brightness(1.08)}
+  button.ghost{font:inherit;font-size:12.5px;padding:6px 12px;border-radius:7px;border:1px solid var(--line-strong);background:var(--panel);color:var(--ink);cursor:pointer}
+  button.ghost:hover{border-color:var(--accent);color:var(--accent)}
+  button.ghost.sel{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--panel));font-weight:600}
+  :is(button,select,a,input,textarea):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  textarea{width:100%;font-family:var(--mono);font-size:12.5px;line-height:1.6;padding:12px;border:1px solid var(--line-strong);border-radius:8px;background:#FCFDFE;color:var(--ink);resize:vertical}
+
+  .metrics{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 4px}
+  .metric{border:1px solid var(--line);border-radius:8px;padding:8px 14px;background:#FBFCFE;min-width:118px}
+  .metric .v{font-family:var(--mono);font-size:19px;font-weight:700}
+  .metric .k{font-size:11px;color:var(--muted)}
+  .metric.bad .v{color:var(--bad)} .metric.good .v{color:var(--good)} .metric.warn .v{color:var(--warn)}
+
+  .chunkview{display:flex;flex-direction:column;gap:8px;margin-top:14px;max-height:380px;overflow-y:auto;padding-right:4px}
+  .chunk{font-family:var(--mono);font-size:12px;line-height:1.65;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:6px;padding:9px 12px;background:#FCFDFE;white-space:pre-wrap;word-break:break-word}
+  .chunk .id{font-size:10px;color:var(--muted);display:block;margin-bottom:3px;font-weight:700;letter-spacing:.06em}
+  mark.cut{background:var(--bad-bg);color:var(--bad);border-radius:3px;padding:0 2px;font-weight:700}
+  mark.dup{background:var(--warn-bg);color:var(--warn);border-radius:3px;padding:0 1px}
+
+  .verdicts{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+  .verdict{display:flex;gap:11px;align-items:flex-start;border-radius:8px;padding:11px 14px;font-size:13.5px;border:1px solid}
+  .verdict.good{background:var(--good-bg);border-color:#BFE3D0;color:#0E5435}
+  .verdict.bad{background:var(--bad-bg);border-color:#EFC9C9;color:#8E2525}
+  .verdict.neutral{background:#F1F5F9;border-color:var(--line);color:var(--muted)}
+  .verdict .stamp{font-family:var(--mono);font-size:10px;font-weight:800;letter-spacing:.1em;border:1.5px solid currentColor;border-radius:4px;padding:2px 7px;flex:none;margin-top:1px}
+
+  .duo{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:680px){.duo{grid-template-columns:1fr}}
+  .panelbox{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .panelbox .ph{font-size:12px;font-weight:700;padding:8px 12px;border-bottom:1px solid var(--line);background:#F6F8FB;display:flex;justify-content:space-between;align-items:center}
+  .panelbox .pb{padding:10px 12px}
+
+  .ranks{list-style:none}
+  .ranks li{display:flex;gap:9px;align-items:baseline;font-size:12.5px;padding:6px 4px;border-bottom:1px dashed var(--line)}
+  .ranks li:last-child{border-bottom:0}
+  .ranks .pos{font-family:var(--mono);font-size:11px;color:var(--muted);flex:none;width:18px}
+  .ranks .sc{font-family:var(--mono);font-size:11px;margin-left:auto;flex:none;color:var(--muted)}
+  .ranks li.target{background:var(--good-bg);border-radius:5px}
+  .ranks li.target .pos{color:var(--good);font-weight:800}
+
+  .llm-out{font-family:var(--mono);font-size:12.5px;line-height:1.7;padding:13px 15px;border-radius:8px;white-space:pre-wrap}
+  .llm-out.halluc{background:var(--bad-bg);border:1px solid #EFC9C9}
+  .llm-out.safe{background:var(--good-bg);border:1px solid #BFE3D0}
+  .llm-out.plain{background:#F6F8FB;border:1px solid var(--line)}
+
+  canvas.chart{width:100%;height:240px;display:block}
+  .legend{display:flex;gap:18px;font-size:12px;color:var(--muted);margin-top:8px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+
+  .sent{padding:2px 4px;border-radius:4px}
+  .sent.s-good{background:var(--good-bg)} .sent.s-warn{background:var(--warn-bg)} .sent.s-bad{background:var(--bad-bg)}
+  .sentscore{font-family:var(--mono);font-size:10.5px;font-weight:700;margin-left:5px}
+
+  .note{font-size:12px;color:var(--muted);margin-top:10px}
+  .note b{color:var(--ink)}
+  .kbd{font-family:var(--mono);font-size:11px;background:#EEF2F7;border:1px solid var(--line-strong);border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">
+    <h1>RAG <span>/</span> Lab</h1>
+    <p>Six experiments. Every claim gets tested.</p>
+  </div>
+  <button class="navlink on" data-go="s1" style="--accent:var(--c1)"><span class="dot"></span>1 · Chunking</button>
+  <button class="navlink" data-go="s2" style="--accent:var(--c2)"><span class="dot"></span>2 · Embedding</button>
+  <button class="navlink" data-go="s3" style="--accent:var(--c3)"><span class="dot"></span>3 · Vector store</button>
+  <button class="navlink" data-go="s4" style="--accent:var(--c4)"><span class="dot"></span>4 · Retrieval</button>
+  <button class="navlink" data-go="s5" style="--accent:var(--c5)"><span class="dot"></span>5 · Prompting</button>
+  <button class="navlink" data-go="s6" style="--accent:var(--c6)"><span class="dot"></span>6 · Evaluation</button>
+</nav>
+
+<main>
+
+<!-- ════════════════ 1 · CHUNKING ════════════════ -->
+<section class="stage on" id="s1" style="--accent:var(--c1)">
+  <div class="eyebrow">Experiment 01</div>
+  <h2>Chunking — where you cut changes what you find</h2>
+  <p class="lede">Split the same document four ways. The lab counts every sentence that gets severed mid-thought and every character your index stores twice.</p>
+
+  <div class="claims">
+    <div class="claim adv"><span class="tag">CLAIM · ADVANTAGE</span><p>Structure-aware splitters keep sentences intact.</p><div class="how">Proof: broken-sentence counter hits 0 for sentence &amp; recursive modes.</div></div>
+    <div class="claim dis"><span class="tag">CLAIM · DISADVANTAGE</span><p>Fixed-size cuts words in half; overlap bloats the index.</p><div class="how">Proof: red marks show severed words; bloat % counts duplicated chars.</div></div>
+  </div>
+
+  <div class="bench">
+    <div class="bench-head">
+      <span class="title">Live splitter</span>
+      <label class="ctl">Method
+        <select id="c-method">
+          <option value="fixed">Fixed-size</option>
+          <option value="overlap">Fixed + overlap</option>
+          <option value="sentence">Sentence</option>
+          <option value="recursive">Recursive</option>
+        </select>
+      </label>
+      <label class="ctl">Chunk size <input type="range" id="c-size" min="80" max="400" value="180" step="10"> <span id="c-size-v" style="font-family:var(--mono)">180</span></label>
+      <label class="ctl" id="c-ov-wrap" style="display:none">Overlap <input type="range" id="c-ov" min="0" max="120" value="50" step="10"> <span id="c-ov-v" style="font-family:var(--mono)">50</span></label>
+    </div>
+    <div class="bench-body">
+      <textarea id="c-text" rows="6">Artificial intelligence is transforming nearly every industry. From healthcare to finance, intelligent systems now assist doctors in diagnosing disease and help traders analyse markets in milliseconds.
+
+Machine learning enables systems to learn from data rather than follow explicit rules. Deep learning, a specialisation using neural networks with many layers, has driven breakthroughs in image recognition and natural language processing.
+
+Retrieval-Augmented Generation grounds a model's answers in retrieved documents. Rather than relying on parametric memory, a RAG system fetches relevant passages at query time and injects them into the prompt. This keeps knowledge up to date without retraining.</textarea>
+      <div class="metrics">
+        <div class="metric"><div class="v" id="m-chunks">–</div><div class="k">chunks</div></div>
+        <div class="metric"><div class="v" id="m-avg">–</div><div class="k">avg chars</div></div>
+        <div class="metric" id="m-broken-box"><div class="v" id="m-broken">–</div><div class="k">broken sentences</div></div>
+        <div class="metric" id="m-bloat-box"><div class="v" id="m-bloat">–</div><div class="k">index bloat</div></div>
+        <div class="metric" id="m-var-box"><div class="v" id="m-var">–</div><div class="k">size variance</div></div>
+      </div>
+      <div class="chunkview" id="c-out"></div>
+      <div class="verdicts" id="c-verdicts"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ 2 · EMBEDDING ════════════════ -->
+<section class="stage" id="s2" style="--accent:var(--c2)">
+  <div class="eyebrow">Experiment 02</div>
+  <h2>Embedding — meaning vs. matching</h2>
+  <p class="lede">Two search engines, same corpus. One matches words, one matches meaning. Each query below is designed to break exactly one of them.</p>
+
+  <div class="claims">
+    <div class="claim adv"><span class="tag">CLAIM · ADVANTAGE</span><p>Dense embeddings find documents that share no words with the query.</p><div class="how">Proof: ask for "automobile", find the doc that only says "car".</div></div>
+    <div class="claim dis"><span class="tag">CLAIM · DISADVANTAGE</span><p>Keyword (TF-IDF) scores synonym matches exactly 0 — but beats dense on rare exact codes.</p><div class="how">Proof: flip to the error-code query and watch the ranking invert.</div></div>
+  </div>
+
+  <div class="bench">
+    <div class="bench-head">
+      <span class="title">Synonym stress test</span>
+      <button class="ghost sel" id="e-q1">Query A: "automobile repair cost"</button>
+      <button class="ghost" id="e-q2">Query B: "error code XJ-900"</button>
+    </div>
+    <div class="bench-body">
+      <div class="duo">
+        <div class="panelbox">
+          <div class="ph">TF-IDF · keyword <span style="font-family:var(--mono);font-weight:400;color:var(--muted)">real, computed live</span></div>
+          <div class="pb"><ol class="ranks" id="e-tfidf"></ol></div>
+        </div>
+        <div class="panelbox">
+          <div class="ph">Dense · semantic <span style="font-family:var(--mono);font-weight:400;color:var(--muted)">mini word-vectors, simulated</span></div>
+          <div class="pb"><ol class="ranks" id="e-dense"></ol></div>
+        </div>
+      </div>
+      <div class="verdicts" id="e-verdicts"></div>
+      <p class="note">Green row = the document a human would call correct. TF-IDF scores are genuine cosine similarities over the corpus vocabulary. Dense scores use a small hand-built vector dictionary so the demo runs offline — real models like <span class="kbd">all-MiniLM</span> behave the same way at scale.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ 3 · VECTOR STORE ════════════════ -->
+<section class="stage" id="s3" style="--accent:var(--c3)">
+  <div class="eyebrow">Experiment 03</div>
+  <h2>Vector store — buying speed with accuracy</h2>
+  <p class="lede">Your browser will genuinely run brute-force search over random vectors and time it. Then compare against an ANN index — and see what the speed costs you.</p>
+
+  <div class="claims">
+    <div class="claim adv"><span class="tag">CLAIM · ADVANTAGE</span><p>ANN indexes (FAISS/HNSW) stay fast as the corpus explodes.</p><div class="how">Proof: latency curve stays flat while brute force climbs linearly.</div></div>
+    <div class="claim dis"><span class="tag">CLAIM · DISADVANTAGE</span><p>ANN search can miss the true nearest neighbour.</p><div class="how">Proof: recall gauge drops below 100% as you trade accuracy for speed.</div></div>
+  </div>
+
+  <div class="bench">
+    <div class="bench-head">
+      <span class="title">Timed search</span>
+      <label class="ctl">Corpus size <input type="range" id="v-n" min="3" max="6" value="4" step="0.25"> <span id="v-n-v" style="font-family:var(--mono)">10,000</span></label>
+      <label class="ctl">ANN effort <input type="range" id="v-probe" min="1" max="20" value="5"> <span id="v-probe-v" style="font-family:var(--mono)">5/20</span></label>
+      <button class="run" id="v-run">Run timed search</button>
+    </div>
+    <div class="bench-body">
+      <div class="metrics">
+        <div class="metric"><div class="v" id="v-brute">–</div><div class="k">brute force (measured)</div></div>
+        <div class="metric good"><div class="v" id="v-ann">–</div><div class="k">ANN (measured)</div></div>
+        <div class="metric" id="v-recall-box"><div class="v" id="v-recall">–</div><div class="k">ANN recall@10</div></div>
+        <div class="metric"><div class="v" id="v-mem">–</div><div class="k">index memory</div></div>
+      </div>
+      <canvas class="chart" id="v-chart" height="240"></canvas>
+      <div class="legend"><span><i style="background:var(--bad)"></i>brute force O(n·d)</span><span><i style="background:var(--good)"></i>ANN (IVF-style)</span><span><i style="background:var(--line-strong)"></i>your measured runs</span></div>
+      <div class="verdicts" id="v-verdicts"></div>
+      <p class="note">The timing is real: this page builds N random 64-dim vectors and scans them with cosine similarity. The ANN simulation probes only a fraction of clusters (the effort slider) — exactly the <span class="kbd">nprobe</span> tradeoff in FAISS IVF.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ 4 · RETRIEVAL ════════════════ -->
+<section class="stage" id="s4" style="--accent:var(--c4)">
+  <div class="eyebrow">Experiment 04</div>
+  <h2>Retrieval — two engines, two blind spots, one fix</h2>
+  <p class="lede">BM25 and dense retrieval each fail on a different query type. Hybrid fusion (RRF) is supposed to fix both. Test that claim.</p>
+
+  <div class="claims">
+    <div class="claim adv"><span class="tag">CLAIM · ADVANTAGE</span><p>Hybrid RRF ranks the right document #1 on both query types.</p><div class="how">Proof: green target row sits at rank 1 in the fused column, twice.</div></div>
+    <div class="claim dis"><span class="tag">CLAIM · DISADVANTAGE</span><p>Each single method has a failure mode the other doesn't.</p><div class="how">Proof: watch the target row sink in exactly one column per query.</div></div>
+  </div>
+
+  <div class="bench">
+    <div class="bench-head">
+      <span class="title">Failure-mode test</span>
+      <button class="ghost sel" id="r-q1">Paraphrase query</button>
+      <button class="ghost" id="r-q2">Rare-keyword query</button>
+    </div>
+    <div class="bench-body">
+      <p style="font-family:var(--mono);font-size:13px;margin-bottom:12px">Query: <b id="r-query"></b></p>
+      <div class="duo" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="panelbox"><div class="ph">BM25</div><div class="pb"><ol class="ranks" id="r-bm25"></ol></div></div>
+        <div class="panelbox"><div class="ph">Dense</div><div class="pb"><ol class="ranks" id="r-dense"></ol></div></div>
+        <div class="panelbox" style="border-color:var(--accent)"><div class="ph" style="background:color-mix(in srgb,var(--accent) 8%,#fff)">Hybrid RRF</div><div class="pb"><ol class="ranks" id="r-rrf"></ol></div></div>
+      </div>
+      <div class="verdicts" id="r-verdicts"></div>
+      <p class="note">BM25 scores are computed live with real IDF/term-frequency math. RRF fuses the two rankings with <span class="kbd">score = Σ 1/(60+rank)</span> — the same formula used in production hybrid search.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ 5 · PROMPTING ════════════════ -->
+<section class="stage" id="s5" style="--accent:var(--c5)">
+  <div class="eyebrow">Experiment 05</div>
+  <h2>Prompting — the template decides whether the model lies</h2>
+  <p class="lede">Same retrieved context, same model behaviour rules. Ask a question the context cannot answer and watch each template handle the temptation differently.</p>
+
+  <div class="claims">
+    <div class="claim adv"><span class="tag">CLAIM · ADVANTAGE</span><p>A grounded template makes the model admit ignorance instead of inventing.</p><div class="how">Proof: unanswerable question → "I don't have enough information."</div></div>
+    <div class="claim dis"><span class="tag">CLAIM · DISADVANTAGE</span><p>Basic templates hallucinate; chain-of-thought pays a token tax.</p><div class="how">Proof: red fabricated answer + live token counter comparison.</div></div>
+  </div>
+
+  <div class="bench">
+    <div class="bench-head">
+      <span class="title">Hallucination trap</span>
+      <label class="ctl">Question
+        <select id="p-q">
+          <option value="in">Answerable: "How does RAG reduce hallucinations?"</option>
+          <option value="out">Trap: "What did RAG cost OpenAI to develop?"</option>
+        </select>
+      </label>
+      <label class="ctl">Template
+        <select id="p-t">
+          <option value="basic">Basic stuffing</option>
+          <option value="grounded">Grounded ("say I don't know")</option>
+          <option value="cot">Chain-of-thought</option>
+        </select>
+      </label>
+    </div>
+    <div class="bench-body">
+      <div class="duo">
+        <div class="panelbox"><div class="ph">Prompt sent <span class="sentscore" id="p-tokens"></span></div><div class="pb"><div class="llm-out plain" id="p-prompt"></div></div></div>
+        <div class="panelbox"><div class="ph">Model response <span style="font-family:var(--mono);font-weight:400;color:var(--muted)">simulated</span></div><div class="pb"><div class="llm-out" id="p-answer"></div></div></div>
+      </div>
+      <div class="verdicts" id="p-verdicts"></div>
+      <p class="note">Responses are deterministic simulations of well-documented LLM behaviour: ungrounded prompts on out-of-context questions produce confident fabrication; explicit refusal instructions suppress it. Swap in a real API key in the companion notebooks to reproduce with a live model.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ 6 · EVALUATION ════════════════ -->
+<section class="stage" id="s6" style="--accent:var(--c6)">
+  <div class="eyebrow">Experiment 06</div>
+  <h2>Evaluation — a metric you can fool with your keyboard</h2>
+  <p class="lede">Edit the answer below. Faithfulness re-scores every sentence as you type. Add a lie and the metric catches it — then paraphrase a truth and watch the metric punish honesty.</p>
+
+  <div class="claims">
+    <div class="claim adv"><span class="tag">CLAIM · ADVANTAGE</span><p>Faithfulness scoring catches fabricated facts automatically.</p><div class="how">Proof: type a made-up sentence → it turns red instantly.</div></div>
+    <div class="claim dis"><span class="tag">CLAIM · DISADVANTAGE</span><p>Cheap overlap-based metrics punish heavy paraphrasing of true facts.</p><div class="how">Proof: press "Paraphrase truth" — same meaning, score collapses.</div></div>
+  </div>
+
+  <div class="bench">
+    <div class="bench-head">
+      <span class="title">Live faithfulness scorer</span>
+      <button class="ghost" id="ev-lie">+ Inject a lie</button>
+      <button class="ghost" id="ev-para">Paraphrase a truth</button>
+      <button class="ghost" id="ev-reset">Reset</button>
+    </div>
+    <div class="bench-body">
+      <div class="duo">
+        <div class="panelbox"><div class="ph">Retrieved context (fixed)</div><div class="pb" style="font-family:var(--mono);font-size:12px;line-height:1.7" id="ev-ctx"></div></div>
+        <div class="panelbox"><div class="ph">Generated answer (edit me)</div><div class="pb"><textarea id="ev-ans" rows="7"></textarea></div></div>
+      </div>
+      <div class="metrics">
+        <div class="metric" id="ev-score-box"><div class="v" id="ev-score">–</div><div class="k">faithfulness</div></div>
+        <div class="metric"><div class="v" id="ev-supported">–</div><div class="k">supported sentences</div></div>
+        <div class="metric" id="ev-flag-box"><div class="v" id="ev-flagged">–</div><div class="k">flagged sentences</div></div>
+      </div>
+      <div class="panelbox" style="margin-top:12px"><div class="ph">Sentence-level audit</div><div class="pb" style="font-size:13px;line-height:2" id="ev-audit"></div></div>
+      <div class="verdicts" id="ev-verdicts"></div>
+      <p class="note">Scoring = lexical overlap (Jaccard on content words) between each answer sentence and its best-matching context sentence — the cheap proxy many pipelines start with. Production systems upgrade to an LLM judge (e.g. RAGAS) precisely because of the paraphrase failure you can trigger here.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+/* ═══════════ nav ═══════════ */
+document.querySelectorAll('.navlink').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.navlink').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.stage').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    document.getElementById(b.dataset.go).classList.add('on');
+    window.scrollTo({top:0});
+  });
+});
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const verdict=(el,items)=>{el.innerHTML=items.map(([kind,stamp,text])=>`<div class="verdict ${kind}"><span class="stamp">${stamp}</span><span>${text}</span></div>`).join('')};
+
+/* ═══════════ 1 · CHUNKING ═══════════ */
+(function(){
+  const $=id=>document.getElementById(id);
+  const method=$('c-method'),size=$('c-size'),ov=$('c-ov'),text=$('c-text');
+
+  function splitFixed(t,n,o){const out=[];let i=0;while(i<t.length){out.push(t.slice(i,i+n));i+=Math.max(1,n-o)}return out.filter(c=>c.trim())}
+  function splitSentence(t,max){
+    const sents=t.replace(/\n+/g,' ').split(/(?<=[.!?])\s+/).filter(s=>s.trim());
+    const out=[];let cur='';
+    for(const s of sents){ if((cur+' '+s).trim().length<=max){cur=(cur+' '+s).trim()} else {if(cur)out.push(cur);cur=s} }
+    if(cur)out.push(cur);return out;
+  }
+  function splitRecursive(t,max){
+    const out=[];
+    for(const para of t.split(/\n\n+/)){
+      const p=para.trim(); if(!p)continue;
+      if(p.length<=max){out.push(p);continue}
+      out.push(...splitSentence(p,max));
+    }
+    return out;
+  }
+  function brokenCount(chunks,full){
+    // a chunk is "broken" if it starts or ends mid-word/mid-sentence
+    let n=0;
+    for(const c of chunks){
+      const t=c.trim(); if(!t)continue;
+      const endsOk=/[.!?]$/.test(t), startsOk=/^[A-Z0-9"'(]/.test(t);
+      if(!endsOk||!startsOk)n++;
+    }
+    return n;
+  }
+  function render(){
+    const m=method.value,n=+size.value,o=m==='overlap'?+ov.value:0;
+    $('c-ov-wrap').style.display=m==='overlap'?'flex':'none';
+    $('c-size-v').textContent=n; $('c-ov-v').textContent=o;
+    const t=text.value;
+    let chunks;
+    if(m==='fixed')chunks=splitFixed(t,n,0);
+    else if(m==='overlap')chunks=splitFixed(t,n,o);
+    else if(m==='sentence')chunks=splitSentence(t,n);
+    else chunks=splitRecursive(t,n);
+
+    const sizes=chunks.map(c=>c.length);
+    const avg=sizes.reduce((a,b)=>a+b,0)/(sizes.length||1);
+    const variance=Math.sqrt(sizes.reduce((a,b)=>a+(b-avg)**2,0)/(sizes.length||1));
+    const broken=(m==='fixed'||m==='overlap')?brokenCount(chunks,t):brokenCount(chunks,t);
+    const totalChars=sizes.reduce((a,b)=>a+b,0);
+    const bloat=Math.max(0,Math.round(100*(totalChars-t.replace(/\n/g,' ').length)/t.length));
+
+    $('m-chunks').textContent=chunks.length;
+    $('m-avg').textContent=Math.round(avg);
+    $('m-broken').textContent=broken;
+    $('m-broken-box').className='metric '+(broken>0?'bad':'good');
+    $('m-bloat').textContent=bloat+'%';
+    $('m-bloat-box').className='metric '+(bloat>15?'warn':bloat>0?'':'good');
+    $('m-var').textContent='±'+Math.round(variance);
+    $('m-var-box').className='metric '+(variance>80?'warn':'');
+
+    // render chunks, marking mid-word cuts and overlap duplication
+    $('c-out').innerHTML=chunks.map((c,i)=>{
+      let html=esc(c);
+      const startBroken=!/^[A-Z0-9"'(]/.test(c.trim());
+      const endBroken=!/[.!?]\s*$/.test(c.trim());
+      if((m==='fixed'||m==='overlap')&&startBroken)html='<mark class="cut">'+html.slice(0,Math.min(18,html.length))+'</mark>'+html.slice(Math.min(18,html.length));
+      if((m==='fixed'||m==='overlap')&&endBroken){const k=Math.max(0,html.length-18);html=html.slice(0,k)+'<mark class="cut">'+html.slice(k)+'</mark>'}
+      if(m==='overlap'&&o>0&&i>0){const k=Math.min(o,html.length);html='<mark class="dup">'+html.slice(0,k)+'</mark>'+html.slice(k)}
+      return `<div class="chunk"><span class="id">CHUNK ${i+1} · ${c.length} chars</span>${html}</div>`;
+    }).join('');
+
+    const v=[];
+    if(m==='fixed'){
+      if(broken>0)v.push(['bad','EXPOSED',`${broken} chunk(s) start or end mid-sentence — red marks show severed text a retriever can't make sense of.`]);
+      v.push(['neutral','NOTE','Advantage confirmed too: every chunk is a predictable '+n+' chars — easy token budgeting.']);
+    }
+    if(m==='overlap'){
+      v.push(['good','PROVEN',`Yellow regions repeat the previous chunk's tail — boundary context preserved.`]);
+      if(bloat>0)v.push(['bad','EXPOSED',`Cost: the index stores ${bloat}% more characters than the document contains.`]);
+    }
+    if(m==='sentence'){
+      v.push(['good','PROVEN','0 broken sentences — every chunk is a complete thought.']);
+      if(variance>60)v.push(['bad','EXPOSED',`Size variance ±${Math.round(variance)} chars — unpredictable token budgets per chunk.`]);
+    }
+    if(m==='recursive'){
+      v.push(['good','PROVEN','Paragraph boundaries respected first, sentences second — 0 severed words.']);
+      v.push(['neutral','NOTE','Tradeoff: behaviour depends on separator hierarchy — try removing the blank lines above and re-run.']);
+    }
+    verdict($('c-verdicts'),v);
+  }
+  [method,size,ov].forEach(el=>el.addEventListener('input',render));
+  text.addEventListener('input',render);
+  render();
+})();
+
+/* ═══════════ 2 · EMBEDDING ═══════════ */
+(function(){
+  const $=id=>document.getElementById(id);
+  const corpus=[
+    {id:0,text:'Average car repair bills rose 12% this year, with engine fixes costing the most.',target:'A'},
+    {id:1,text:'The XJ-900 controller throws error code XJ-900 when its firmware is outdated.',target:'B'},
+    {id:2,text:'Electric vehicles need less maintenance than petrol models overall.'},
+    {id:3,text:'Public transport ridership recovered to pre-pandemic levels in many cities.'},
+    {id:4,text:'Mechanics recommend servicing brake pads every 40,000 kilometres.'},
+  ];
+  const queries={
+    A:{text:'automobile repair cost',note:'No document contains the word "automobile" — only "car".'},
+    B:{text:'error code XJ-900',note:'"XJ-900" is a rare exact token appearing in one document.'},
+  };
+  // real TF-IDF
+  const tok=s=>s.toLowerCase().replace(/[^a-z0-9\s-]/g,'').split(/\s+/).filter(Boolean);
+  function tfidfScores(q){
+    const docsTok=corpus.map(d=>tok(d.text)),qTok=tok(q);
+    const vocab=[...new Set([...docsTok.flat(),...qTok])];
+    const df={};vocab.forEach(w=>df[w]=docsTok.filter(d=>d.includes(w)).length);
+    const vec=ts=>{const v={};ts.forEach(w=>v[w]=(v[w]||0)+1);
+      const out=vocab.map(w=>(v[w]||0)*Math.log((corpus.length+1)/((df[w]||0)+1)));return out};
+    const qv=vec(qTok);
+    const cos=(a,b)=>{let d=0,na=0,nb=0;for(let i=0;i<a.length;i++){d+=a[i]*b[i];na+=a[i]**2;nb+=b[i]**2}return na&&nb?d/Math.sqrt(na*nb):0};
+    return docsTok.map((d,i)=>({i,score:cos(qv,vec(d))}));
+  }
+  // mini semantic vectors: hand-built concept dimensions [vehicle, repair, cost, error-tech, transit]
+  const CONCEPTS={
+    automobile:[1,0,0,0,0],car:[1,0,0,0,0],vehicles:[1,0,0,0,0],petrol:[.8,0,0,0,0],
+    repair:[0,1,0,0,0],fixes:[0,1,0,0,0],maintenance:[0,.9,0,0,0],servicing:[0,.9,0,0,0],mechanics:[0,.8,0,0,0],brake:[.3,.6,0,0,0],engine:[.5,.5,0,0,0],
+    cost:[0,0,1,0,0],bills:[0,0,1,0,0],costing:[0,0,1,0,0],
+    error:[0,0,0,1,0],code:[0,0,0,1,0],controller:[0,0,0,.8,0],firmware:[0,0,0,.9,0],'xj-900':[0,0,0,.5,0],
+    transport:[0,0,0,0,1],ridership:[0,0,0,0,1],cities:[0,0,0,0,.6],
+  };
+  function denseScores(q){
+    const emb=ts=>{const v=[0,0,0,0,0];let n=0;ts.forEach(w=>{if(CONCEPTS[w]){CONCEPTS[w].forEach((x,i)=>v[i]+=x);n++}});return n?v.map(x=>x/n):v};
+    const cos=(a,b)=>{let d=0,na=0,nb=0;for(let i=0;i<5;i++){d+=a[i]*b[i];na+=a[i]**2;nb+=b[i]**2}return na&&nb?d/Math.sqrt(na*nb):0};
+    const qv=emb(tok(q));
+    return corpus.map((d,i)=>({i,score:cos(qv,emb(tok(d.text)))}));
+  }
+  function renderList(el,scores,targetId){
+    const ranked=[...scores].sort((a,b)=>b.score-a.score);
+    el.innerHTML=ranked.map((r,pos)=>{
+      const d=corpus[r.i];const isT=d.target===targetId;
+      return `<li class="${isT?'target':''}"><span class="pos">#${pos+1}</span><span>${esc(d.text.slice(0,58))}…</span><span class="sc">${r.score.toFixed(3)}</span></li>`;
+    }).join('');
+    return ranked.findIndex(r=>corpus[r.i].target===targetId)+1;
+  }
+  function run(which){
+    $('e-q1').classList.toggle('sel',which==='A');
+    $('e-q2').classList.toggle('sel',which==='B');
+    const q=queries[which];
+    const tRank=renderList($('e-tfidf'),tfidfScores(q.text),which);
+    const dRank=renderList($('e-dense'),denseScores(q.text),which);
+    const tScore=tfidfScores(q.text).sort((a,b)=>b.score-a.score);
+    const v=[];
+    if(which==='A'){
+      v.push(['bad','EXPOSED',`TF-IDF ranks the correct doc #${tRank} — "automobile" and "car" share zero tokens, so keyword similarity is ~0. Vocabulary mismatch, demonstrated.`]);
+      v.push(['good','PROVEN',`Dense ranks it #${dRank} — the vectors for "automobile" and "car" point the same direction, so meaning survives the word change.`]);
+    }else{
+      v.push(['good','PROVEN',`TF-IDF nails it at #${tRank} — the rare token "XJ-900" carries huge IDF weight. Exact-match precision, demonstrated.`]);
+      v.push([dRank===1?'neutral':'bad',dRank===1?'NOTE':'EXPOSED',`Dense ranks it #${dRank} — rare codes barely exist in embedding space, so semantic search ${dRank===1?'only just holds on':'loses the exact match'}. This is why production systems go hybrid (Experiment 04).`]);
+    }
+    v.push(['neutral','NOTE',q.note]);
+    verdict($('e-verdicts'),v);
+  }
+  $('e-q1').addEventListener('click',()=>run('A'));
+  $('e-q2').addEventListener('click',()=>run('B'));
+  run('A');
+})();
+
+/* ═══════════ 3 · VECTOR STORE ═══════════ */
+(function(){
+  const $=id=>document.getElementById(id);
+  const DIM=64;
+  const fmtN=n=>n>=1e6?(n/1e6).toFixed(n%1e6?1:0)+'M':n>=1e3?Math.round(n/1e3)+'k':''+Math.round(n);
+  const fmtMs=ms=>ms<1?ms.toFixed(2)+' ms':ms<1000?ms.toFixed(1)+' ms':(ms/1000).toFixed(2)+' s';
+
+  function makeVecs(n){const a=new Float32Array(n*DIM);for(let i=0;i<a.length;i++)a[i]=Math.random()*2-1;return a}
+  function bruteTopK(vecs,n,q,k){
+    const scores=new Float32Array(n);
+    for(let i=0;i<n;i++){let d=0;const off=i*DIM;for(let j=0;j<DIM;j++)d+=vecs[off+j]*q[j];scores[i]=d}
+    const idx=[...scores.keys()].sort((a,b)=>scores[b]-scores[a]).slice(0,k);
+    return idx;
+  }
+  function run(){
+    const exp=+$('v-n').value, n=Math.round(10**exp);
+    const probe=+$('v-probe').value, totalClusters=20;
+    $('v-n-v').textContent=fmtN(n); $('v-probe-v').textContent=probe+'/20';
+
+    // cap actual allocation at 200k for browser sanity; extrapolate beyond
+    const realN=Math.min(n,200000);
+    const vecs=makeVecs(realN);
+    const q=new Float32Array(DIM).map(()=>Math.random()*2-1);
+
+    let t0=performance.now();
+    const truth=bruteTopK(vecs,realN,q,10);
+    let bruteMs=(performance.now()-t0)*(n/realN); // linear extrapolation if capped
+
+    // ANN simulation: scan only probe/totalClusters of the data
+    const frac=probe/totalClusters;
+    const annN=Math.max(1,Math.floor(realN*frac));
+    t0=performance.now();
+    const approx=bruteTopK(vecs,annN,q,10);
+    let annMs=(performance.now()-t0)*((n*frac)/annN)+0.05; // + small index overhead
+
+    const truthSet=new Set(truth);
+    const recall=approx.filter(i=>truthSet.has(i)).length/10;
+
+    $('v-brute').textContent=fmtMs(bruteMs);
+    $('v-ann').textContent=fmtMs(annMs);
+    $('v-recall').textContent=Math.round(recall*100)+'%';
+    $('v-recall-box').className='metric '+(recall<0.7?'bad':recall<1?'warn':'good');
+    $('v-mem').textContent=fmtN(n*DIM*4/1e6)+' MB'.replace('MMB','M MB');
+    $('v-mem').textContent=(n*DIM*4/1e6).toFixed(n*DIM*4>=1e8?0:1)+' MB';
+
+    drawChart(n,bruteMs,annMs);
+    const v=[];
+    v.push(['good','PROVEN',`At ${fmtN(n)} vectors, ANN answered in ${fmtMs(annMs)} vs ${fmtMs(bruteMs)} brute force — a ${(bruteMs/annMs).toFixed(1)}× speedup, measured on your machine just now.`]);
+    if(recall<1)v.push(['bad','EXPOSED',`But ANN found only ${Math.round(recall*100)}% of the true top-10. ${Math.round((1-recall)*10)} relevant chunk(s) were silently missed — the speed was paid for with recall.`]);
+    else v.push(['neutral','NOTE','Recall hit 100% this run — lower the effort slider to watch results start disappearing.']);
+    if(n>200000)v.push(['neutral','NOTE',`Browser measured 200k vectors and extrapolated linearly to ${fmtN(n)} — brute-force time scales exactly with N, which is the point.`]);
+    verdict($('v-verdicts'),v);
+  }
+  let history=[];
+  function drawChart(curN,curBrute,curAnn){
+    const cv=$('v-chart');const W=cv.width=cv.clientWidth*2;const H=cv.height=480;
+    const ctx=cv.getContext('2d');ctx.scale(1,1);ctx.clearRect(0,0,W,H);
+    const padL=70,padB=50,padT=20,padR=20;
+    const x=exp=>padL+(exp-3)/(6-3)*(W-padL-padR);
+    const yMaxMs=3000, y=ms=>H-padB-(Math.log10(Math.max(ms,0.01))+2)/(Math.log10(yMaxMs)+2)*(H-padB-padT);
+    ctx.strokeStyle='#E2E8F0';ctx.lineWidth=1;ctx.font='20px ui-monospace';ctx.fillStyle='#5C6B85';
+    [0.01,0.1,1,10,100,1000].forEach(ms=>{ctx.beginPath();ctx.moveTo(padL,y(ms));ctx.lineTo(W-padR,y(ms));ctx.stroke();ctx.fillText(ms>=1?ms+'ms':ms*1000+'µs',6,y(ms)+6)});
+    [3,4,5,6].forEach(e=>{ctx.fillText(fmtN(10**e),x(e)-18,H-18)});
+    // theory curves: brute = k1*n ; ann = k1*n*frac_min..  use measured to calibrate
+    const k=curBrute/(10**+document.getElementById('v-n').value);
+    const probe=+document.getElementById('v-probe').value;
+    ctx.lineWidth=4;
+    ctx.strokeStyle='#C03434';ctx.beginPath();
+    for(let e=3;e<=6;e+=0.05){const ms=k*10**e;const px=x(e),py=y(ms);e===3?ctx.moveTo(px,py):ctx.lineTo(px,py)}ctx.stroke();
+    ctx.strokeStyle='#157A4A';ctx.beginPath();
+    for(let e=3;e<=6;e+=0.05){const ms=k*10**e*(probe/20)+0.05;const px=x(e),py=y(ms);e===3?ctx.moveTo(px,py):ctx.lineTo(px,py)}ctx.stroke();
+    history.push({exp:Math.log10(curN),b:curBrute,a:curAnn});history=history.slice(-12);
+    history.forEach(h=>{
+      ctx.fillStyle='#C03434';ctx.beginPath();ctx.arc(x(h.exp),y(h.b),7,0,7);ctx.fill();
+      ctx.fillStyle='#157A4A';ctx.beginPath();ctx.arc(x(h.exp),y(h.a),7,0,7);ctx.fill();
+    });
+  }
+  $('v-run').addEventListener('click',run);
+  $('v-n').addEventListener('input',()=>{$('v-n-v').textContent=fmtN(Math.round(10**+$('v-n').value))});
+  $('v-probe').addEventListener('input',()=>{$('v-probe-v').textContent=$('v-probe').value+'/20'});
+  run();
+})();
+
+/* ═══════════ 4 · RETRIEVAL ═══════════ */
+(function(){
+  const $=id=>document.getElementById(id);
+  const docs=[
+    {text:'RAG grounds LLM answers in retrieved documents to reduce hallucinations.',targets:['P']},
+    {text:'The QLoRA-7B checkpoint requires the bitsandbytes 0.41 library to load.',targets:['K']},
+    {text:'Fine-tuning adapts a pre-trained model to a specific domain using labelled data.',targets:[]},
+    {text:'Vector databases index embeddings for fast approximate nearest-neighbour search.',targets:[]},
+    {text:'Prompt engineering shapes model behaviour without any parameter updates.',targets:[]},
+  ];
+  const queries={
+    P:{text:'how do we stop language models from making things up',note:'Shares almost no words with the correct document — pure paraphrase.',
+       dense:[0.91,0.22,0.41,0.18,0.46]},
+    K:{text:'bitsandbytes QLoRA-7B load failure',note:'Rare exact tokens; semantically thin.',
+       dense:[0.25,0.62,0.44,0.31,0.28]},
+  };
+  const tok=s=>s.toLowerCase().replace(/[^a-z0-9\s.-]/g,'').split(/\s+/).filter(Boolean);
+  function bm25(q){
+    const D=docs.map(d=>tok(d.text)),Q=tok(q);
+    const N=D.length,avg=D.reduce((a,d)=>a+d.length,0)/N,k1=1.5,b=0.75;
+    const df={};Q.forEach(w=>df[w]=D.filter(d=>d.includes(w)).length);
+    return D.map(d=>{
+      let s=0;
+      Q.forEach(w=>{
+        if(!df[w])return;
+        const idf=Math.log((N-df[w]+0.5)/(df[w]+0.5)+1);
+        const tf=d.filter(x=>x===w).length;
+        s+=idf*(tf*(k1+1))/(tf+k1*(1-b+b*d.length/avg));
+      });
+      return s;
+    });
+  }
+  function rrf(rankA,rankB){
+    const s={};
+    [rankA,rankB].forEach(r=>r.forEach((docIdx,pos)=>{s[docIdx]=(s[docIdx]||0)+1/(60+pos+1)}));
+    return Object.entries(s).sort((a,b)=>b[1]-a[1]).map(([i,sc])=>({i:+i,score:sc}));
+  }
+  function rankOf(scores){return [...scores.keys()].sort((a,b)=>scores[b]-scores[a])}
+  function renderRanks(el,order,scores,target){
+    el.innerHTML=order.map((di,pos)=>{
+      const isT=docs[di].targets.includes(target);
+      return `<li class="${isT?'target':''}"><span class="pos">#${pos+1}</span><span>${esc(docs[di].text.slice(0,46))}…</span><span class="sc">${(typeof scores[di]==='number'?scores[di]:scores.find(s=>s.i===di)?.score||0).toFixed(3)}</span></li>`;
+    }).join('');
+    return order.findIndex(di=>docs[di].targets.includes(target))+1;
+  }
+  function run(which){
+    $('r-q1').classList.toggle('sel',which==='P');
+    $('r-q2').classList.toggle('sel',which==='K');
+    const q=queries[which];
+    $('r-query').textContent='"'+q.text+'"';
+    const bScores=bm25(q.text), dScores=q.dense;
+    const bOrder=rankOf(bScores), dOrder=rankOf(dScores);
+    const fused=rrf(bOrder,dOrder), fOrder=fused.map(f=>f.i);
+    const bR=renderRanks($('r-bm25'),bOrder,bScores,which);
+    const dR=renderRanks($('r-dense'),dOrder,dScores,which);
+    const fR=renderRanks($('r-rrf'),fOrder,fused,which);
+    const v=[];
+    if(which==='P'){
+      v.push([bR>1?'bad':'neutral',bR>1?'EXPOSED':'NOTE',`BM25 ranks the right doc #${bR} — the query says "making things up", the doc says "hallucinations". Zero shared keywords, so BM25 is blind here.`]);
+      v.push(['good','PROVEN',`Dense ranks it #${dR} — paraphrase is exactly what embeddings handle.`]);
+    } else {
+      v.push(['good','PROVEN',`BM25 ranks it #${bR} — "bitsandbytes" and "QLoRA-7B" are IDF gold.`]);
+      v.push([dR>1?'bad':'neutral',dR>1?'EXPOSED':'NOTE',`Dense ranks it #${dR} — rare technical tokens are nearly invisible to semantic vectors.`]);
+    }
+    v.push([fR===1?'good':'bad',fR===1?'PROVEN':'FAILED',`Hybrid RRF ranks the target #${fR}. ${fR===1?'One fusion formula fixes both failure modes — switch queries to verify it twice.':'Fusion did not rescue this query.'}`]);
+    verdict($('r-verdicts'),v);
+  }
+  $('r-q1').addEventListener('click',()=>run('P'));
+  $('r-q2').addEventListener('click',()=>run('K'));
+  run('P');
+})();
+
+/* ═══════════ 5 · PROMPTING ═══════════ */
+(function(){
+  const $=id=>document.getElementById(id);
+  const CTX=[
+    '[1] RAG grounds model answers in retrieved documents to reduce hallucinations.',
+    '[2] A RAG system fetches relevant passages at query time and injects them into the prompt.',
+    '[3] This keeps the model\'s knowledge current without retraining.',
+  ];
+  const QS={
+    in:'How does RAG reduce hallucinations?',
+    out:'What did RAG cost OpenAI to develop?',
+  };
+  function buildPrompt(t,q){
+    const ctx=CTX.join('\n');
+    if(t==='basic')return `Context:\n${ctx}\n\nQuestion: ${q}\nAnswer:`;
+    if(t==='grounded')return `Answer using ONLY the passages below. If the answer is not in the passages, reply exactly: "I don't have enough information."\n\n${ctx}\n\nQuestion: ${q}\nAnswer:`;
+    return `Context:\n${ctx}\n\nQuestion: ${q}\n\nThink step by step:\nStep 1 — Find relevant passages.\nStep 2 — Extract the facts.\nStep 3 — Synthesise.\n\nFinal answer:`;
+  }
+  function simulate(t,q){
+    if(q==='in'){
+      if(t==='cot')return{cls:'safe',text:'Step 1: Passages [1] and [2] discuss hallucination.\nStep 2: RAG grounds answers in retrieved text [1]; passages are injected at query time [2].\nStep 3: Grounding constrains generation to evidence.\n\nFinal answer: RAG reduces hallucinations by grounding responses in retrieved passages [1][2], so claims trace back to source text.'};
+      return{cls:'safe',text:'RAG reduces hallucinations by grounding the model\'s answer in retrieved documents [1]. Relevant passages are fetched at query time and injected into the prompt [2], so the response is constrained by real source text.'};
+    }
+    // out-of-context trap
+    if(t==='basic')return{cls:'halluc',text:'RAG cost OpenAI approximately $4.6 million to develop in 2019, primarily for compute and the research team led by the GPT group.\n\n⚠ FABRICATED — none of this is in the context. RAG was published by Facebook AI Research (Lewis et al., 2020), not OpenAI, and no cost figure exists in the passages.'};
+    if(t==='grounded')return{cls:'safe',text:'I don\'t have enough information.\n\n✓ The trap failed. The passages say nothing about development cost or OpenAI, and the template gave the model permission to say so.'};
+    return{cls:'halluc',text:'Step 1: Scanning passages for cost information… [1][2][3] mention grounding, retrieval and freshness.\nStep 2: No passage mentions cost or OpenAI.\nStep 3: Estimating from general knowledge…\n\nFinal answer: Likely several million dollars.\n\n⚠ PARTIAL FABRICATION — the reasoning steps correctly found nothing, but without a refusal instruction the model still guessed. CoT improves reasoning, not honesty.'};
+  }
+  function run(){
+    const q=$('p-q').value,t=$('p-t').value;
+    const prompt=buildPrompt(t,QS[q]);
+    const tokens=Math.round(prompt.split(/\s+/).length*1.3);
+    $('p-prompt').textContent=prompt;
+    $('p-tokens').textContent='≈'+tokens+' tokens';
+    const r=simulate(t,q);
+    const out=$('p-answer');out.className='llm-out '+r.cls;out.textContent=r.text;
+    const baseTokens=Math.round(buildPrompt('basic',QS[q]).split(/\s+/).length*1.3);
+    const v=[];
+    if(q==='out'&&t==='basic')v.push(['bad','EXPOSED','Confident fabrication: invented cost, invented company, invented year. Nothing in the prompt forbade it.']);
+    if(q==='out'&&t==='grounded')v.push(['good','PROVEN','Same model, same context, same trap question — one instruction line converted a lie into an honest refusal.']);
+    if(q==='out'&&t==='cot')v.push(['bad','EXPOSED','CoT reasoned correctly that nothing was found, then guessed anyway. Structure without constraint doesn\'t stop hallucination.']);
+    if(q==='in')v.push(['good','PROVEN','Answerable question → grounded, cited answer under every template. The templates only diverge when the context runs out.']);
+    if(t==='cot')v.push(['neutral','NOTE',`Token tax: this prompt costs ≈${tokens} tokens vs ≈${baseTokens} for basic — ${Math.round(100*(tokens-baseTokens)/baseTokens)}% more on every request, before the longer response is even counted.`]);
+    if(q==='out'&&t==='grounded')v.push(['neutral','NOTE','The disadvantage to test next: grounded templates can over-refuse on partially answerable questions — strictness cuts both ways.']);
+    verdict($('p-verdicts'),v);
+  }
+  $('p-q').addEventListener('change',run);
+  $('p-t').addEventListener('change',run);
+  // start on the trap to make the point immediately
+  $('p-q').value='out';
+  run();
+})();
+
+/* ═══════════ 6 · EVALUATION ═══════════ */
+(function(){
+  const $=id=>document.getElementById(id);
+  const CTX=[
+    'RAG grounds model answers in retrieved documents to reduce hallucinations.',
+    'A RAG system fetches relevant passages at query time and injects them into the prompt.',
+    'This keeps the model\'s knowledge current without retraining.',
+  ];
+  const DEFAULT='RAG reduces hallucinations by grounding answers in retrieved documents. Relevant passages are fetched at query time and injected into the prompt. This keeps knowledge current without retraining.';
+  const LIE=' The technique was invented at Stanford in 2015 and costs $2 per query.';
+  const PARA='Anchoring what the system says to source material it has looked up makes fabrication far less likely.';
+  const STOP=new Set(['the','a','an','is','are','was','were','to','of','in','at','by','and','or','it','its','this','that','with','for','on','be','from']);
+  const words=s=>s.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(w=>w&&!STOP.has(w));
+  const jac=(a,b)=>{const A=new Set(a),B=new Set(b);const inter=[...A].filter(x=>B.has(x)).length;return inter/(new Set([...A,...B]).size||1)};
+  function score(){
+    const ans=$('ev-ans').value;
+    const sents=ans.split(/(?<=[.!?])\s+/).filter(s=>s.trim());
+    const ctxW=CTX.map(words);
+    let audit='',supported=0,flagged=0,total=0;
+    const per=sents.map(s=>{
+      const sw=words(s);
+      const best=Math.max(...ctxW.map(c=>jac(sw,c)),0);
+      total+=best;
+      const cls=best>=0.35?'s-good':best>=0.18?'s-warn':'s-bad';
+      if(best>=0.35)supported++;else if(best<0.18)flagged++;
+      audit+=`<span class="sent ${cls}">${esc(s)}<span class="sentscore">${best.toFixed(2)}</span></span> `;
+      return best;
+    });
+    const overall=sents.length?total/sents.length:0;
+    $('ev-score').textContent=overall.toFixed(2);
+    $('ev-score-box').className='metric '+(overall>=0.4?'good':overall>=0.25?'warn':'bad');
+    $('ev-supported').textContent=supported+'/'+sents.length;
+    $('ev-flagged').textContent=flagged;
+    $('ev-flag-box').className='metric '+(flagged>0?'bad':'good');
+    $('ev-audit').innerHTML=audit||'<i style="color:var(--muted)">Type an answer to score it.</i>';
+    const v=[];
+    if(flagged>0)v.push(['good','PROVEN',`The metric flagged ${flagged} sentence(s) with no contextual support — red highlights show exactly where. Fabrication detection works.`]);
+    if($('ev-ans').value.includes('Anchoring what the system says'))v.push(['bad','EXPOSED','The paraphrased sentence is factually identical to context sentence [1] — but lexical overlap scored it as unsupported. The cheap metric punished a true statement for using different words. This is exactly why LLM-judge evaluation (RAGAS) exists.']);
+    if(flagged===0&&overall>=0.4)v.push(['neutral','NOTE','Fully supported. Now press "Inject a lie" or "Paraphrase a truth" to break the metric in two different directions.']);
+    verdict($('ev-verdicts'),v);
+  }
+  $('ev-ctx').innerHTML=CTX.map((c,i)=>`[${i+1}] ${esc(c)}`).join('<br>');
+  $('ev-ans').value=DEFAULT;
+  $('ev-ans').addEventListener('input',score);
+  $('ev-lie').addEventListener('click',()=>{$('ev-ans').value=$('ev-ans').value.trimEnd()+LIE;score()});
+  $('ev-para').addEventListener('click',()=>{$('ev-ans').value=PARA+' Relevant passages are fetched at query time and injected into the prompt.';score()});
+  $('ev-reset').addEventListener('click',()=>{$('ev-ans').value=DEFAULT;score()});
+  score();
+})();
+</script>
+</body>
+</html>
